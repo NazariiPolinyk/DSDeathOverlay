@@ -1,0 +1,37 @@
+﻿<Window x:Class="DSDeathOverlay.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:DSDeathOverlay"
+        mc:Ignorable="d"
+        Title="DSDeathOverlay"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="Manual"
+        Left="20" Top="20"
+        Focusable="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Window.Resources>
+        <local:BoolToBrushConverter x:Key="EditModeBrush"
+                                    FalseBrush="#80000000"
+                                    TrueBrush="#A0202060"/>
+    </Window.Resources>
+    <Border x:Name="RootBorder"
+            CornerRadius="6"
+            Padding="10,4"
+            Background="{Binding IsEditMode, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource EditModeBrush}}"
+            MouseLeftButtonDown="RootBorder_MouseLeftButtonDown">
+        <TextBlock x:Name="DeathText"
+                   Text="{Binding DisplayText}"
+                   FontFamily="Consolas"
+                   FontWeight="Bold"
+                   Foreground="White"/>
+    </Border>
+</Window>
