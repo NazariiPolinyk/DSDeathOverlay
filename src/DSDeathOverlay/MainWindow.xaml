@@ -22,16 +22,40 @@
         <local:BoolToBrushConverter x:Key="EditModeBrush"
                                     FalseBrush="#80000000"
                                     TrueBrush="#A0202060"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     </Window.Resources>
     <Border x:Name="RootBorder"
             CornerRadius="6"
             Padding="10,4"
             Background="{Binding IsEditMode, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource EditModeBrush}}"
             MouseLeftButtonDown="RootBorder_MouseLeftButtonDown">
-        <TextBlock x:Name="DeathText"
-                   Text="{Binding DisplayText}"
-                   FontFamily="Consolas"
-                   FontWeight="Bold"
-                   Foreground="White"/>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0"
+                       x:Name="DeathText"
+                       Text="{Binding DisplayText}"
+                       FontFamily="Consolas"
+                       FontWeight="Bold"
+                       Foreground="White"
+                       VerticalAlignment="Center"/>
+            <Button Grid.Column="1"
+                    x:Name="CloseButton"
+                    Content="x"
+                    Click="CloseButton_Click"
+                    Margin="10,0,0,0"
+                    Padding="6,0"
+                    Background="Transparent"
+                    Foreground="White"
+                    BorderThickness="0"
+                    FontWeight="Bold"
+                    FontFamily="Consolas"
+                    Cursor="Hand"
+                    ToolTip="Close (Shift+F9)"
+                    VerticalAlignment="Center"
+                    Visibility="{Binding IsEditMode, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}"/>
+        </Grid>
     </Border>
 </Window>

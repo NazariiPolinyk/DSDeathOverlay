@@ -85,10 +85,14 @@ The overlay shows a status string while it's still working things out:
 
 ## Hotkeys
 
-| Key  | Action |
-| ---- | --- |
-| `F8` | Toggle **edit mode**. The background tints purple and the window becomes draggable with the left mouse button. Click-through is restored when you press F8 again. |
-| `F9` | Show/hide the overlay. |
+| Key        | Action |
+| ---------- | --- |
+| `F8`       | Toggle **edit mode**. The background tints purple, the window becomes draggable with the left mouse button, and a small `x` close button appears. Click-through is restored when you press F8 again. |
+| `F9`       | Show/hide the overlay. |
+| `Shift+F8` | Reset overlay position to the top-left default (`20, 20`). |
+| `Shift+F9` | Close DSDeathOverlay. |
+
+You can also close the app from the on-screen `x` button when in edit mode.
 
 Position and font size are saved to
 `%LOCALAPPDATA%\DSDeathOverlay\settings.json` when the app exits.

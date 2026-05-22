@@ -22,10 +22,16 @@ namespace DSDeathOverlay;
 /// </summary>
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
-    private const int HotkeyIdToggleEdit = 1;
-    private const int HotkeyIdShowHide   = 2;
+    private const int HotkeyIdToggleEdit    = 1;
+    private const int HotkeyIdShowHide      = 2;
+    private const int HotkeyIdResetPosition = 3;
+    private const int HotkeyIdCloseApp      = 4;
     private const uint VK_F8 = 0x77;
     private const uint VK_F9 = 0x78;
+
+    /// <summary>Default overlay position used by Shift+F8 reset and on first launch.</summary>
+    private const double DefaultLeft = 20;
+    private const double DefaultTop  = 20;
 
     private DispatcherTimer? _topmostKeeper;
     private DeathPoller? _poller;
@@ -126,8 +132,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RegisterHotkeys()
     {
-        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdToggleEdit, NativeMethods.MOD_NONE, VK_F8);
-        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdShowHide,   NativeMethods.MOD_NONE, VK_F9);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdToggleEdit,    NativeMethods.MOD_NONE,  VK_F8);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdShowHide,      NativeMethods.MOD_NONE,  VK_F9);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdResetPosition, NativeMethods.MOD_SHIFT, VK_F8);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdCloseApp,      NativeMethods.MOD_SHIFT, VK_F9);
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -145,6 +153,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ToggleVisible();
                 handled = true;
             }
+            else if (id == HotkeyIdResetPosition)
+            {
+                ResetPosition();
+                handled = true;
+            }
+            else if (id == HotkeyIdCloseApp)
+            {
+                Application.Current.Shutdown();
+                handled = true;
+            }
         }
         return IntPtr.Zero;
     }
@@ -154,6 +172,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _isVisible = !_isVisible;
         Visibility = _isVisible ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private void ResetPosition()
+    {
+        // Settings are persisted on close, so no mid-session save is needed.
+        Left = DefaultLeft;
+        Top  = DefaultTop;
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
+        => Application.Current.Shutdown();
 
     private void OnPollerUpdated(object? sender, DeathCountEventArgs e)
     {
@@ -190,6 +218,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdToggleEdit);
         NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdShowHide);
+        NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdResetPosition);
+        NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdCloseApp);
 
         _topmostKeeper?.Stop();
         if (_poller is not null) _poller.Updated -= OnPollerUpdated;
