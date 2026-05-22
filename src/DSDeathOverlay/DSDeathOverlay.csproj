@@ -21,4 +21,9 @@
     <SelfContained>true</SelfContained>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="games.json" />
+    <None Include="games.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

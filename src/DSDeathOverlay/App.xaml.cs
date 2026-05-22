@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Windows;
 using DSDeathOverlay.Logging;
+using DSDeathOverlay.Memory;
 using DSDeathOverlay.Services;
 using DSDeathOverlay.Settings;
 
@@ -20,7 +21,9 @@ public partial class App : Application
         _log.Log("=== DSDeathOverlay starting ===");
 
         _settings = SettingsStore.Load(_log);
-        _poller = new DeathPoller(_log);
+
+        var profiles = GameProfileStore.Load(_log);
+        _poller = new DeathPoller(_log, profiles);
 
         var window = new MainWindow();
         window.Initialize(_poller, _settings);

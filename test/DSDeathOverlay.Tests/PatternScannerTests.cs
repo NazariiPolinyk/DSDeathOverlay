@@ -107,9 +107,11 @@ public class PatternScannerTests
     public void Find_FullDSRPattern_FoundAtKnownOffset()
     {
         // Build a synthetic 256-byte buffer with the real DSR ChrClassBase pattern
-        // dropped at offset 0x40, then ensure we recover that offset.
+        // (loaded from the shipped games.json profile) dropped at offset 0x40, then
+        // ensure we recover that offset.
         const int InsertOffset = 0x40;
-        var (pattern, mask) = PatternScanner.ParsePattern(DeathReader.ChrClassBasePattern);
+        var dsr = GameProfileStore.LoadEmbedded()!.Games.Single(g => g.ShortTag == "DSR");
+        var (pattern, mask) = PatternScanner.ParsePattern(dsr.AobPattern!);
 
         var haystack = new byte[256];
         for (int i = 0; i < haystack.Length; i++) haystack[i] = (byte)(i ^ 0x37); // noise

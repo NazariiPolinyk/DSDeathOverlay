@@ -1,0 +1,41 @@
+{
+  "$comment": [
+    "Game profiles for DSDeathOverlay. If a game patch breaks one of the pointer",
+    "chains below, edit the matching entry and restart the overlay. The 'chainOffsets64'",
+    "values are integers (decimal); the first one is the module-relative base offset,",
+    "subsequent values are offsets within the dereferenced pointer at each step.",
+    "Pointer chain offsets ported from https://github.com/Quidrex/DSDeaths/blob/master/Program.cs"
+  ],
+  "games": [
+    {
+      "displayName": "Dark Souls: Remastered",
+      "shortTag": "DSR",
+      "processName": "DarkSoulsRemastered",
+      "moduleName": "DarkSoulsRemastered.exe",
+      "aobPattern": "48 8B 05 ? ? ? ? 48 85 C0 ? ? F3 0F 58 80 AC 00 00 00",
+      "aobValueOffset": 152
+    },
+    {
+      "displayName": "Dark Souls II: Scholar of the First Sin",
+      "shortTag": "DS2",
+      "processName": "DarkSoulsII",
+      "moduleName": "DarkSoulsII.exe",
+      "chainOffsets32": [ 18154004, 116, 184, 52, 4, 652, 256 ],
+      "chainOffsets64": [ 23217392, 208, 1168, 260 ]
+    },
+    {
+      "displayName": "Dark Souls III",
+      "shortTag": "DS3",
+      "processName": "DarkSoulsIII",
+      "moduleName": "DarkSoulsIII.exe",
+      "chainOffsets64": [ 74867384, 152 ]
+    },
+    {
+      "displayName": "Sekiro: Shadows Die Twice",
+      "shortTag": "SEK",
+      "processName": "sekiro",
+      "moduleName": "sekiro.exe",
+      "chainOffsets64": [ 64269504, 144 ]
+    }
+  ]
+}

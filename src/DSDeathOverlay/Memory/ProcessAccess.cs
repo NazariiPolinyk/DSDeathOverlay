@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using DSDeathOverlay.Logging;
@@ -15,7 +14,7 @@ namespace DSDeathOverlay.Memory;
 /// <see cref="NativeMethods.READ_ONLY_PROCESS_ACCESS"/> only — no write or thread-creation rights.
 /// Disposable; safe to keep alive for the duration of the overlay session.
 /// </summary>
-public sealed class ProcessAccess : IDisposable
+public sealed class ProcessAccess : IMemoryReader, IDisposable
 {
     private readonly ILogger _log;
     private IntPtr _handle;
@@ -23,72 +22,101 @@ public sealed class ProcessAccess : IDisposable
 
     public int ProcessId { get; }
 
-    /// <summary>Base address of DarkSoulsRemastered.exe inside the remote process.</summary>
+    /// <summary>Base address of the active game's main module inside the remote process.</summary>
     public ulong ModuleBase { get; }
 
-    /// <summary>Size of the DarkSoulsRemastered.exe image in bytes.</summary>
+    /// <summary>Size of the matched module image in bytes.</summary>
     public uint ModuleSize { get; }
 
     public ulong ModuleEnd => ModuleBase + ModuleSize;
 
-    private ProcessAccess(int pid, IntPtr handle, ulong baseAddr, uint size, ILogger log)
+    /// <summary>
+    /// True if the target process is 32-bit running under WoW64. False for native x64
+    /// processes. Used by <see cref="PointerChainDeathReader"/> to pick the right chain.
+    /// </summary>
+    public bool IsWow64 { get; }
+
+    private ProcessAccess(int pid, IntPtr handle, ulong baseAddr, uint size, bool isWow64, ILogger log)
     {
         ProcessId = pid;
         _handle = handle;
         ModuleBase = baseAddr;
         ModuleSize = size;
+        IsWow64 = isWow64;
         _log = log;
     }
 
     /// <summary>
-    /// Try to find the running Dark Souls Remastered process and open a read-only handle
-    /// to it. Returns null if the game isn't running or we can't read its module list.
+    /// Iterate the supplied <paramref name="profiles"/>, find the first one whose process
+    /// is currently running, open it read-only, and return both the wrapper and the matched
+    /// profile. Returns null when none of the games are running.
     /// </summary>
-    public static ProcessAccess? TryOpenDarkSouls(ILogger log)
+    public static ProcessAccess? TryOpenAnyKnown(
+        IEnumerable<GameProfile> profiles,
+        out GameProfile? matched,
+        ILogger log)
     {
-        // DarkSoulsRemastered.exe is the only executable name we accept.
-        Process[] candidates = Process.GetProcessesByName("DarkSoulsRemastered");
-        try
+        matched = null;
+
+        foreach (var profile in profiles)
         {
-            foreach (var p in candidates)
+            if (string.IsNullOrWhiteSpace(profile.ProcessName)) continue;
+
+            Process[] candidates = Process.GetProcessesByName(profile.ProcessName);
+            try
             {
-                IntPtr h = NativeMethods.OpenProcess(
-                    NativeMethods.READ_ONLY_PROCESS_ACCESS, false, p.Id);
-
-                if (h == IntPtr.Zero)
+                foreach (var p in candidates)
                 {
-                    int err = Marshal.GetLastWin32Error();
-                    log.Log($"OpenProcess pid={p.Id} failed: Win32 {err}");
-                    continue;
-                }
+                    IntPtr h = NativeMethods.OpenProcess(
+                        NativeMethods.READ_ONLY_PROCESS_ACCESS, false, p.Id);
 
-                if (TryGetMainModule(h, "DarkSoulsRemastered.exe", out ulong baseAddr, out uint size))
-                {
-                    log.Log($"Opened DSR pid={p.Id} base=0x{baseAddr:X} size=0x{size:X}");
-                    return new ProcessAccess(p.Id, h, baseAddr, size, log);
-                }
+                    if (h == IntPtr.Zero)
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        log.Log($"OpenProcess pid={p.Id} ({profile.ProcessName}) failed: Win32 {err}");
+                        continue;
+                    }
 
-                log.Log($"pid={p.Id}: main module not found, closing.");
-                NativeMethods.CloseHandle(h);
+                    bool isWow64 = false;
+                    NativeMethods.IsWow64Process(h, out isWow64);
+
+                    uint filter = isWow64
+                        ? NativeMethods.LIST_MODULES_32BIT
+                        : NativeMethods.LIST_MODULES_64BIT;
+
+                    if (TryGetMainModule(h, profile.ModuleName, filter,
+                            out ulong baseAddr, out uint size))
+                    {
+                        log.Log(
+                            $"Opened {profile.DisplayName} pid={p.Id} " +
+                            $"({(isWow64 ? "32" : "64")}-bit) " +
+                            $"base=0x{baseAddr:X} size=0x{size:X}");
+                        matched = profile;
+                        return new ProcessAccess(p.Id, h, baseAddr, size, isWow64, log);
+                    }
+
+                    log.Log($"pid={p.Id}: module '{profile.ModuleName}' not found, closing.");
+                    NativeMethods.CloseHandle(h);
+                }
             }
-        }
-        finally
-        {
-            foreach (var p in candidates) p.Dispose();
+            finally
+            {
+                foreach (var p in candidates) p.Dispose();
+            }
         }
 
         return null;
     }
 
     private static bool TryGetMainModule(
-        IntPtr hProc, string moduleName, out ulong baseAddr, out uint size)
+        IntPtr hProc, string moduleName, uint filterFlag,
+        out ulong baseAddr, out uint size)
     {
         baseAddr = 0;
         size = 0;
 
-        // Enumerate twice: first to get the required buffer size, then to actually fetch.
         if (!NativeMethods.EnumProcessModulesEx(
-                hProc, Array.Empty<IntPtr>(), 0, out uint needed, NativeMethods.LIST_MODULES_64BIT)
+                hProc, Array.Empty<IntPtr>(), 0, out uint needed, filterFlag)
             || needed == 0)
         {
             return false;
@@ -98,7 +126,7 @@ public sealed class ProcessAccess : IDisposable
         var modules = new IntPtr[count];
 
         if (!NativeMethods.EnumProcessModulesEx(
-                hProc, modules, needed, out _, NativeMethods.LIST_MODULES_64BIT))
+                hProc, modules, needed, out _, filterFlag))
         {
             return false;
         }
@@ -147,7 +175,6 @@ public sealed class ProcessAccess : IDisposable
 
     public bool TryReadInt32(ulong address, out int value)
     {
-        Span<byte> tmp = stackalloc byte[4];
         var arr = new byte[4];
         int n = ReadBytes(address, arr);
         if (n != 4)
@@ -156,6 +183,19 @@ public sealed class ProcessAccess : IDisposable
             return false;
         }
         value = BitConverter.ToInt32(arr, 0);
+        return true;
+    }
+
+    public bool TryReadUInt32(ulong address, out uint value)
+    {
+        var arr = new byte[4];
+        int n = ReadBytes(address, arr);
+        if (n != 4)
+        {
+            value = 0;
+            return false;
+        }
+        value = BitConverter.ToUInt32(arr, 0);
         return true;
     }
 

@@ -50,8 +50,18 @@ internal static class NativeMethods
         IntPtr nSize,
         out IntPtr lpNumberOfBytesRead);
 
-    /// <summary>List 64-bit modules only (we are an x64 app, DSR is x64).</summary>
+    /// <summary>List 64-bit modules only.</summary>
     public const uint LIST_MODULES_64BIT = 0x02;
+
+    /// <summary>List 32-bit modules only (used to enumerate WoW64 processes like 32-bit DS2).</summary>
+    public const uint LIST_MODULES_32BIT = 0x01;
+
+    /// <summary>List both 32- and 64-bit modules.</summary>
+    public const uint LIST_MODULES_ALL = 0x03;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWow64Process(IntPtr hProcess, [MarshalAs(UnmanagedType.Bool)] out bool Wow64Process);
 
     [DllImport("psapi.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
