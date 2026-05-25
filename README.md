@@ -45,6 +45,38 @@ warnings.
   considered safe by their communities for years. Still: **use at your own
   risk.** Anti-cheat behaviour can change without notice.
 
+## Download
+
+Pre-built Windows builds are published on
+**[GitHub Releases](https://github.com/NazariiPolinyk/DSDeathOverlay/releases)**.
+
+1. Open the latest release.
+2. Download `DSDeathOverlay-v*-win-x64.zip` from the latest release (or run the
+   **Release** workflow manually and download the zip from that run’s
+   **Artifacts** if no release exists yet).
+3. Extract the zip anywhere.
+4. Run `DSDeathOverlay.exe` (keep `games.json` in the same folder if you want
+   to edit offsets without rebuilding).
+
+No .NET install is required — the release is a self-contained single-file exe.
+
+> **Private repo:** only GitHub users with access to this repository can
+> download releases. To share with friends, add them as collaborators or make
+> the repository public.
+
+### Publishing a new release (maintainers)
+
+Push a version tag and GitHub Actions builds and uploads the zip automatically:
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+You can also run the **Release** workflow manually from the repo’s **Actions**
+tab; the zip appears under that run’s **Artifacts** (useful for testing before
+tagging).
+
 ## Requirements
 
 - Windows 10 or 11 (x64).
