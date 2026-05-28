@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -22,20 +23,23 @@ namespace DSDeathOverlay;
 /// </summary>
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
-    private const int HotkeyIdToggleEdit    = 1;
-    private const int HotkeyIdShowHide      = 2;
-    private const int HotkeyIdResetPosition = 3;
-    private const int HotkeyIdCloseApp      = 4;
-    private const uint VK_F8 = 0x77;
-    private const uint VK_F9 = 0x78;
+    private const int HotkeyIdToggleEdit       = 1;
+    private const int HotkeyIdShowHide         = 2;
+    private const int HotkeyIdResetPosition    = 3;
+    private const int HotkeyIdCloseApp         = 4;
+    private const int HotkeyIdToggleBossList   = 5;
+    private const int HotkeyIdCycleBossForward = 6;
+    private const int HotkeyIdCycleBossBack    = 7;
 
     /// <summary>Default overlay position used by Shift+F8 reset and on first launch.</summary>
     private const double DefaultLeft = 20;
     private const double DefaultTop  = 20;
 
     private DispatcherTimer? _topmostKeeper;
+    private DispatcherTimer? _bossSnapshotTimer;
     private DeathPoller? _poller;
     private SettingsStore? _settings;
+    private BossDeathTracker? _bossTracker;
     private HwndSource? _hwndSource;
     private IntPtr _hwnd;
 
@@ -62,16 +66,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DataContext = ViewModel;
     }
 
-    /// <summary>Wire up the poller and persisted settings. Called by <see cref="App"/> at startup.</summary>
-    public void Initialize(DeathPoller poller, SettingsStore settings)
+    /// <summary>Wire up dependencies. Called by <see cref="App"/> at startup.</summary>
+    public void Initialize(DeathPoller poller, SettingsStore settings, BossDeathTracker bossTracker)
     {
         _poller = poller;
         _settings = settings;
+        _bossTracker = bossTracker;
 
         // Apply persisted position / font size before showing the window.
         Left = settings.Current.Left;
         Top  = settings.Current.Top;
         DeathText.FontSize = settings.Current.FontSize;
+        ViewModel.IsBossListExpanded = settings.Current.IsBossListExpanded;
 
         poller.Updated += OnPollerUpdated;
     }
@@ -95,6 +101,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         _topmostKeeper.Tick += (_, _) => ReAssertTopmost();
         _topmostKeeper.Start();
+
+        // Pull a fresh boss snapshot a few times per second so death counts
+        // and the active-boss highlight stay current without coupling the UI
+        // to the poller's thread.
+        _bossSnapshotTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(300),
+        };
+        _bossSnapshotTimer.Tick += (_, _) => RefreshBossSnapshot();
+        _bossSnapshotTimer.Start();
     }
 
     /// <summary>
@@ -132,10 +148,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RegisterHotkeys()
     {
-        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdToggleEdit,    NativeMethods.MOD_NONE,  VK_F8);
-        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdShowHide,      NativeMethods.MOD_NONE,  VK_F9);
-        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdResetPosition, NativeMethods.MOD_SHIFT, VK_F8);
-        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdCloseApp,      NativeMethods.MOD_SHIFT, VK_F9);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdToggleEdit,       NativeMethods.MOD_NONE,  NativeMethods.VK_F8);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdShowHide,         NativeMethods.MOD_NONE,  NativeMethods.VK_F9);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdResetPosition,    NativeMethods.MOD_SHIFT, NativeMethods.VK_F8);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdCloseApp,         NativeMethods.MOD_SHIFT, NativeMethods.VK_F9);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdToggleBossList,   NativeMethods.MOD_NONE,  NativeMethods.VK_F10);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdCycleBossForward, NativeMethods.MOD_NONE,  NativeMethods.VK_F11);
+        NativeMethods.RegisterHotKey(_hwnd, HotkeyIdCycleBossBack,    NativeMethods.MOD_SHIFT, NativeMethods.VK_F11);
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -163,6 +182,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 Application.Current.Shutdown();
                 handled = true;
             }
+            else if (id == HotkeyIdToggleBossList)
+            {
+                ViewModel.IsBossListExpanded = !ViewModel.IsBossListExpanded;
+                handled = true;
+            }
+            else if (id == HotkeyIdCycleBossForward)
+            {
+                _bossTracker?.CycleActiveBoss(+1);
+                RefreshBossSnapshot();
+                handled = true;
+            }
+            else if (id == HotkeyIdCycleBossBack)
+            {
+                _bossTracker?.CycleActiveBoss(-1);
+                RefreshBossSnapshot();
+                handled = true;
+            }
         }
         return IntPtr.Zero;
     }
@@ -183,15 +219,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void CloseButton_Click(object sender, RoutedEventArgs e)
         => Application.Current.Shutdown();
 
+    private void ResetBossesButton_Click(object sender, RoutedEventArgs e)
+    {
+        _bossTracker?.ResetAllForCurrentGame();
+        RefreshBossSnapshot();
+    }
+
+    private void BossRow_Click(object sender, RoutedEventArgs e)
+    {
+        // Clicking is only useful in edit mode; outside edit mode the window is
+        // click-through and this handler can't be reached anyway.
+        if (!_isEditMode) return;
+        if (sender is not Button btn) return;
+        if (btn.Tag is not string bossId || string.IsNullOrEmpty(bossId)) return;
+
+        _bossTracker?.SetActiveBoss(bossId);
+        RefreshBossSnapshot();
+    }
+
+    private void RefreshBossSnapshot()
+    {
+        if (_bossTracker is null) return;
+        var snapshot = _bossTracker.BuildSnapshot();
+        ViewModel.ApplyBossSnapshot(snapshot);
+    }
+
     private void OnPollerUpdated(object? sender, DeathCountEventArgs e)
     {
         // The poller runs on a background thread; marshal to the UI thread.
-        Dispatcher.BeginInvoke(new Action(() => ViewModel.ApplyUpdate(e)));
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            ViewModel.ApplyUpdate(e);
+            RefreshBossSnapshot();
+        }));
     }
 
     private void RootBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (!_isEditMode) return; // shouldn't reach here when click-through, but be defensive
+
+        // Clicks on the per-boss buttons should select that boss, not drag the window.
+        if (e.OriginalSource is DependencyObject src && IsInsideBossRow(src)) return;
+
         try
         {
             DragMove();
@@ -202,9 +271,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private static bool IsInsideBossRow(DependencyObject src)
+    {
+        // Walk up the visual tree; if we hit a Button, the click was on a clickable
+        // row element and the button's own handler should take it from here.
+        DependencyObject? cursor = src;
+        while (cursor is not null)
+        {
+            if (cursor is Button) return true;
+            cursor = System.Windows.Media.VisualTreeHelper.GetParent(cursor);
+        }
+        return false;
+    }
+
     protected override void OnClosing(CancelEventArgs e)
     {
-        // Persist position / font size on close.
+        // Persist position / font size / panel state on close.
         if (_settings is not null)
         {
             _settings.Current = _settings.Current with
@@ -212,16 +294,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 Left = Left,
                 Top = Top,
                 FontSize = DeathText.FontSize,
+                IsBossListExpanded = ViewModel.IsBossListExpanded,
             };
             _settings.Save();
         }
+
+        _bossTracker?.Save();
 
         NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdToggleEdit);
         NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdShowHide);
         NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdResetPosition);
         NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdCloseApp);
+        NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdToggleBossList);
+        NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdCycleBossForward);
+        NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdCycleBossBack);
 
         _topmostKeeper?.Stop();
+        _bossSnapshotTimer?.Stop();
         if (_poller is not null) _poller.Updated -= OnPollerUpdated;
         _hwndSource?.RemoveHook(WndProc);
 

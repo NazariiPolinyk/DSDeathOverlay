@@ -13,6 +13,9 @@ public sealed record OverlaySettings
     public double Left { get; init; } = 20;
     public double Top { get; init; } = 20;
     public double FontSize { get; init; } = 28;
+
+    /// <summary>Remembers whether the per-boss list was expanded last session.</summary>
+    public bool IsBossListExpanded { get; init; }
 }
 
 /// <summary>

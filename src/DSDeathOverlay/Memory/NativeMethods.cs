@@ -135,6 +135,12 @@ internal static class NativeMethods
 
     public const int WM_HOTKEY = 0x0312;
 
+    // Virtual-key codes for the hotkeys we register.
+    public const uint VK_F8  = 0x77;
+    public const uint VK_F9  = 0x78;
+    public const uint VK_F10 = 0x79;
+    public const uint VK_F11 = 0x7A;
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);

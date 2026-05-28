@@ -3,9 +3,10 @@
 External, **read-only** in-game death counter for the FromSoftware Souls games.
 
 A small WPF window that sits on top of the game, displays your current death
-count, and never touches a single byte of the game's memory or files. No DLL
-injection, no `WriteProcessMemory`, no `CreateRemoteThread`. Same technique as
-the public projects [DSDeaths](https://github.com/Quidrex/DSDeaths) and
+count and your per-boss deaths, and never touches a single byte of the game's
+memory or files. No DLL injection, no `WriteProcessMemory`, no
+`CreateRemoteThread`. Same technique as the public projects
+[DSDeaths](https://github.com/Quidrex/DSDeaths) and
 [DSDC](https://github.com/cisc0disco/DSDC).
 
 ## Supported games
@@ -115,18 +116,57 @@ The overlay shows a status string while it's still working things out:
 - `DS3 - Deaths: --   (load a save)` - on the title screen / no character loaded.
 - `DS3 - Deaths: 42` - reading live values.
 
+## Per-boss death tracking
+
+The overlay can attribute individual deaths to specific bosses on top of the
+total counter. The compact display becomes `DS3 - Deaths: 42 | Vordt: 3` when a
+boss is selected, and pressing `F10` reveals an expanded list with every boss
+in the game and how many times you've died to each.
+
+Because none of the supported games store a "currently fighting which boss"
+field in memory that's safe to read, the overlay uses **manual selection**:
+before (or during) a fight, mark the active boss and any subsequent death is
+credited to it. When you beat the boss, clear the selection. There's no
+automatic detection in this release — manual mode is the same approach used
+by the popular [HitCounterManager](https://github.com/topeterk/HitCounterManager)
+tool, and it works correctly for every supported game from day one.
+
+Workflow:
+
+1. Press `F11` (or `Shift+F11` to cycle backwards) to step through the boss
+   list for the active game until your boss shows next to the death count, or
+   enter edit mode with `F8` and click the boss name in the expanded list.
+2. Play. Every death that arrives while a boss is active increments that
+   boss's counter.
+3. When the boss dies, press `F11` until you reach "none" (or cycle past the
+   end of the list), or pick a different boss.
+
+Per-boss counts are saved to
+`%LOCALAPPDATA%\DSDeathOverlay\boss-deaths.json` and survive restarts. The
+boss roster comes from `bosses.json` next to the .exe (with an embedded
+fallback baked into the binary, identical to how `games.json` works); edit
+the file to add bosses, rename them, or — once community-supplied offsets are
+available — enable automatic detection by switching a game's `detection.type`
+from `manual` to `pointerChainFlag`. See the comment block at the top of
+`bosses.json` for the schema.
+
 ## Hotkeys
 
-| Key        | Action |
-| ---------- | --- |
-| `F8`       | Toggle **edit mode**. The background tints purple, the window becomes draggable with the left mouse button, and a small `x` close button appears. Click-through is restored when you press F8 again. |
-| `F9`       | Show/hide the overlay. |
-| `Shift+F8` | Reset overlay position to the top-left default (`20, 20`). |
-| `Shift+F9` | Close DSDeathOverlay. |
+| Key          | Action |
+| ------------ | --- |
+| `F8`         | Toggle **edit mode**. The background tints purple, the window becomes draggable with the left mouse button, and small `reset` and `x` buttons appear. Click-through is restored when you press F8 again. |
+| `F9`         | Show/hide the overlay. |
+| `F10`        | Show/hide the expanded per-boss death list. |
+| `F11`        | Cycle the active boss forward (none → first → second → … → none). |
+| `Shift+F8`   | Reset overlay position to the top-left default (`20, 20`). |
+| `Shift+F9`   | Close DSDeathOverlay. |
+| `Shift+F11`  | Cycle the active boss backward. |
 
-You can also close the app from the on-screen `x` button when in edit mode.
+You can also close the app from the on-screen `x` button when in edit mode,
+or reset all per-boss counts for the current game with the `reset` button
+next to it.
 
-Position and font size are saved to
+Position, font size, and panel state are saved to
 `%LOCALAPPDATA%\DSDeathOverlay\settings.json` when the app exits.
 
 ## Updating offsets when a patch breaks things
@@ -219,17 +259,28 @@ DarkSoulsRemasteredDeathCounter/
       IDeathReader.cs                 # interface for the two reader strategies
       AobDeathReader.cs               # DSR: pattern scan + RIP-relative
       PointerChainDeathReader.cs      # DS2/DS3/SEK: walk fixed offset chain
+      BossCatalog.cs                  # bosses.json data model
+      BossCatalogStore.cs             # loads bosses.json (file beats embedded)
+      IBossContextReader.cs           # "which boss is active right now?"
+      ManualBossContextReader.cs      # active boss set by hotkey / click
+      PointerChainBossContextReader.cs# future-ready auto-detection strategy
     Services/
       DeathPoller.cs                  # 250ms loop; auto-reconnects between games
+      BossDeathTracker.cs             # attributes deltas to the active boss
+      BossDeathStore.cs               # JSON persistence for boss-deaths.json
     Settings/
       SettingsStore.cs                # JSON persistence under %LOCALAPPDATA%
     Logging/
       ILogger.cs
       FileLogger.cs                   # deaths.log next to the exe
+    bosses.json                       # per-game boss rosters (also embedded)
   test/DSDeathOverlay.Tests/
     PatternScannerTests.cs            # AOB + mask scanner
     PointerChainWalkTests.cs          # DSDeaths-style walker (incl. 32-bit)
     GameProfileStoreTests.cs          # JSON parsing + embedded fallback
+    BossCatalogStoreTests.cs          # bosses.json parsing + embedded fallback
+    BossDeathTrackerTests.cs          # delta attribution / persistence / reset
+    PointerChainBossContextReaderTests.cs
     FakeMemoryReader.cs               # in-memory IMemoryReader for tests
 ```
 

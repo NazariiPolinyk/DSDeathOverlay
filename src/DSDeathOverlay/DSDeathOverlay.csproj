@@ -24,6 +24,8 @@
   <ItemGroup>
     <EmbeddedResource Include="games.json" />
     <None Include="games.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="bosses.json" />
+    <None Include="bosses.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
