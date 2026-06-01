@@ -52,6 +52,20 @@ public sealed class GameProfile
     /// </summary>
     public int[]? ChainOffsets64 { get; init; }
 
+    /// <summary>
+    /// When true, the last offset in a pointer chain reads a 4-byte int at
+    /// <c>addr + lastOffset</c> instead of dereferencing 8 bytes (DSDeaths-style).
+    /// Used by the SrShadowy DS2 SotFS death-counter layout.
+    /// </summary>
+    public bool ChainFinalHopInt32 { get; init; }
+
+    /// <summary>
+    /// Optional alternate 64-bit chains tried in order when the primary
+    /// <see cref="ChainOffsets64"/> cannot produce a value (e.g. DS2 SotFS HUD dots vs
+    /// DSDeaths gravestone offset).
+    /// </summary>
+    public PointerChainVariant[]? ChainVariants64 { get; init; }
+
     [JsonIgnore]
     public bool UsesAob => AobPattern is not null && AobValueOffset is not null;
 
@@ -63,4 +77,16 @@ public sealed class GameProfile
 public sealed class GameProfileSet
 {
     public GameProfile[] Games { get; init; } = System.Array.Empty<GameProfile>();
+}
+
+/// <summary>Alternate pointer chain for a game profile (see <see cref="GameProfile.ChainVariants64"/>).</summary>
+public sealed class PointerChainVariant
+{
+    /// <summary>Optional label written to <c>deaths.log</c> when this chain succeeds.</summary>
+    public string? Label { get; init; }
+
+    public int[] Offsets { get; init; } = System.Array.Empty<int>();
+
+    /// <summary>When true, read a 4-byte int on the last hop (SrShadowy-style).</summary>
+    public bool FinalHopInt32 { get; init; }
 }

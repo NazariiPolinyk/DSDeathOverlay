@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using DSDeathOverlay.Logging;
 
 namespace DSDeathOverlay.Memory;
@@ -19,16 +22,18 @@ namespace DSDeathOverlay.Memory;
 /// deaths = (int)addr;                 // lower 32 bits of the final deref ARE the count
 /// </code>
 ///
-/// The "final iteration also derefs" wrinkle matches DSDeaths exactly: the death-count
-/// value sits at <c>prevAddr + lastOffset</c> as a 4-byte int, so reading 8 bytes there
-/// gives us the value in the low dword.
+/// DS2 SotFS can optionally use a SrShadowy-style final hop that reads a 4-byte int at
+/// the last offset without a final pointer dereference.
 /// </summary>
 public sealed class PointerChainDeathReader : IDeathReader
 {
+    private readonly record struct ChainCandidate(int[] Offsets, bool FinalHopInt32, string Label);
+
     private readonly IMemoryReader _reader;
     private readonly GameProfile _profile;
     private readonly ILogger _log;
-    private readonly int[] _offsets;
+    private readonly ChainCandidate[] _candidates;
+    private ChainCandidate? _activeCandidate;
     private bool _initialized;
     private bool _loggedFirstRead;
     private long _lastFailLogTicks;
@@ -43,28 +48,56 @@ public sealed class PointerChainDeathReader : IDeathReader
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
         _profile = profile ?? throw new ArgumentNullException(nameof(profile));
         _log = log ?? NullLogger.Instance;
+        _candidates = BuildCandidates(profile, _reader.IsWow64);
+    }
 
-        // Pick the right chain for the target process's bitness.
-        int[]? chain = _reader.IsWow64 ? profile.ChainOffsets32 : profile.ChainOffsets64;
+    private static ChainCandidate[] BuildCandidates(GameProfile profile, bool isWow64)
+    {
+        var list = new List<ChainCandidate>();
 
-        if (chain is null || chain.Length == 0)
+        int[]? primary = isWow64 ? profile.ChainOffsets32 : profile.ChainOffsets64;
+        if (primary is { Length: > 0 })
+        {
+            list.Add(new ChainCandidate(primary, profile.ChainFinalHopInt32, "primary"));
+        }
+
+        if (!isWow64 && profile.ChainVariants64 is not null)
+        {
+            foreach (var variant in profile.ChainVariants64)
+            {
+                if (variant.Offsets is { Length: > 0 })
+                {
+                    list.Add(new ChainCandidate(
+                        variant.Offsets,
+                        variant.FinalHopInt32,
+                        variant.Label ?? "alternate"));
+                }
+            }
+        }
+
+        if (list.Count == 0)
         {
             throw new ArgumentException(
                 $"Profile '{profile.DisplayName}' has no pointer chain for " +
-                $"{(_reader.IsWow64 ? "32" : "64")}-bit.", nameof(profile));
+                $"{(isWow64 ? "32" : "64")}-bit.", nameof(profile));
         }
 
-        _offsets = chain;
+        return list.ToArray();
     }
 
     public bool Initialize()
     {
-        // A pointer chain has no one-time setup — just mark ready so the poller
-        // proceeds to TryReadDeathCount.
         _initialized = true;
+        var sb = new StringBuilder();
+        for (int i = 0; i < _candidates.Length; i++)
+        {
+            if (i > 0) sb.Append("; ");
+            sb.Append(FormatChain(_candidates[i]));
+        }
+
         _log.Log(
             $"[{_profile.ShortTag}] pointer chain ready " +
-            $"({(_reader.IsWow64 ? "32" : "64")}-bit, {_offsets.Length} hops).");
+            $"({(_reader.IsWow64 ? "32" : "64")}-bit, module=0x{_reader.ModuleBase:X}): {sb}");
         return true;
     }
 
@@ -72,41 +105,95 @@ public sealed class PointerChainDeathReader : IDeathReader
     {
         if (!_initialized) return null;
 
-        if (!TryWalkDiagnostic(_reader, _offsets, out int value, out ulong endpoint, out string? failure))
+        // Once a chain works, stick with it for the session to avoid flip-flopping.
+        if (_activeCandidate is { } pinned)
         {
-            LogThrottled($"[{_profile.ShortTag}] chain read failed: {failure}");
+            int? pinnedValue = TryReadWithCandidate(pinned);
+            if (pinnedValue is not null) return pinnedValue;
+            _activeCandidate = null;
+        }
+
+        foreach (var candidate in _candidates)
+        {
+            int? value = TryReadWithCandidate(candidate);
+            if (value is null) continue;
+
+            if (_activeCandidate is null && !string.Equals(candidate.Label, "primary", StringComparison.Ordinal))
+            {
+                _log.Log($"[{_profile.ShortTag}] using alternate chain ({candidate.Label}).");
+            }
+
+            _activeCandidate = candidate;
+            return value;
+        }
+
+        return null;
+    }
+
+    private int? TryReadWithCandidate(ChainCandidate candidate)
+    {
+        if (!TryWalkDiagnostic(
+                _reader,
+                candidate.Offsets,
+                candidate.FinalHopInt32,
+                out int value,
+                out ulong endpoint,
+                out string? failure))
+        {
+            LogThrottled(
+                $"[{_profile.ShortTag}] chain read failed ({candidate.Label}): {failure}" +
+                MaybeStaticSlotHint(_reader, candidate.Offsets, failure));
             return null;
         }
 
-        // A real death count is never negative. A negative result means the chain
-        // walked through readable memory but landed somewhere whose low 32 bits
-        // have the high bit set — almost always a pointer-aligned field, i.e. the
-        // chain is stale for this game build. Surface it loudly (throttled) so the
-        // user can copy fresh offsets from DSDeaths into games.json next to the
-        // .exe; pre-fix this path was silent and looked indistinguishable from
-        // "no save loaded".
         if (value < 0)
         {
             LogThrottled(
                 $"[{_profile.ShortTag}] chain produced negative value {value} " +
-                $"(endpoint 0x{endpoint:X}); rejecting as garbage. " +
-                $"Chain may be stale — check DSDeaths master for newer offsets.");
+                $"({candidate.Label}, endpoint 0x{endpoint:X}); rejecting as garbage. " +
+                $"Chain may be stale — check DSDeaths master or SrShadowy DSII-SOTFS-DIE-COUNT.");
             return null;
         }
 
         if (!_loggedFirstRead)
         {
             _loggedFirstRead = true;
-            _log.Log($"[{_profile.ShortTag}] first read: {value} (chain endpoint = 0x{endpoint:X}).");
+            _log.Log(
+                $"[{_profile.ShortTag}] first read: {value} ({candidate.Label}, " +
+                $"endpoint = 0x{endpoint:X}).");
         }
+
         return value;
     }
 
     /// <summary>
-    /// Emit <paramref name="message"/> at most once per <see cref="FailLogInterval"/>.
-    /// Shared between the chain-failure and negative-value paths so a busted chain
-    /// can't double up its log spam at full poll rate.
+    /// If the walk died on hop 0/1 with a null deref, include the qword at the static
+    /// slot so stale-base debugging does not require Cheat Engine.
     /// </summary>
+    private static string MaybeStaticSlotHint(IMemoryReader reader, int[] offsets, string? failure)
+    {
+        if (failure is null || offsets.Length == 0) return "";
+        if (!failure.Contains("hop 1", StringComparison.Ordinal) &&
+            !failure.Contains("hop 0", StringComparison.Ordinal))
+        {
+            return "";
+        }
+
+        ulong slot = unchecked(reader.ModuleBase + (ulong)(long)offsets[0]);
+        if (!reader.TryReadUInt64(slot, out ulong qword))
+            return $" Static slot 0x{slot:X}: unreadable.";
+
+        return $" Static slot 0x{slot:X} (= module+0x{offsets[0]:X}) holds 0x{qword:X}.";
+    }
+
+    private static string FormatChain(ChainCandidate c)
+    {
+        string hops = string.Join(", ", c.Offsets.Select(o => $"0x{o:X}"));
+        return c.FinalHopInt32
+            ? $"{c.Label} [{hops}] (final int32)"
+            : $"{c.Label} [{hops}]";
+    }
+
     private void LogThrottled(string message)
     {
         long now = DateTime.UtcNow.Ticks;
@@ -117,22 +204,21 @@ public sealed class PointerChainDeathReader : IDeathReader
         }
     }
 
-    /// <summary>
-    /// Pure walker exposed for unit tests. Walks the chain against any
-    /// <see cref="IMemoryReader"/> and produces the final 4-byte value.
-    /// </summary>
     public static bool TryWalk(IMemoryReader reader, int[] offsets, out int value)
-        => TryWalkDiagnostic(reader, offsets, out value, out _, out _);
+        => TryWalkDiagnostic(reader, offsets, finalHopInt32: false, out value, out _, out _);
 
-    /// <summary>
-    /// Same walk as <see cref="TryWalk"/>, but additionally reports the address that
-    /// produced the final read and a human-readable failure reason when the walk
-    /// aborts. Used by <see cref="TryReadDeathCount"/> to surface useful diagnostics
-    /// in <c>deaths.log</c> without changing the public test surface.
-    /// </summary>
     public static bool TryWalkDiagnostic(
         IMemoryReader reader,
         int[] offsets,
+        out int value,
+        out ulong endpoint,
+        out string? failure)
+        => TryWalkDiagnostic(reader, offsets, finalHopInt32: false, out value, out endpoint, out failure);
+
+    public static bool TryWalkDiagnostic(
+        IMemoryReader reader,
+        int[] offsets,
+        bool finalHopInt32,
         out int value,
         out ulong endpoint,
         out string? failure)
@@ -152,6 +238,7 @@ public sealed class PointerChainDeathReader : IDeathReader
         for (int i = 0; i < offsets.Length; i++)
         {
             int off = offsets[i];
+            bool isLast = i == offsets.Length - 1;
 
             if (addr == 0)
             {
@@ -159,8 +246,20 @@ public sealed class PointerChainDeathReader : IDeathReader
                 return false;
             }
 
-            // Two's-complement add — negative offsets are legal in CE-style chains.
             ulong target = unchecked(addr + (ulong)(long)off);
+
+            if (isLast && finalHopInt32)
+            {
+                if (!reader.TryReadInt32(target, out int v32))
+                {
+                    failure = $"hop {i}: TryReadInt32(0x{target:X}) failed (offset 0x{off:X})";
+                    return false;
+                }
+
+                endpoint = target;
+                value = v32;
+                return true;
+            }
 
             if (reader.IsWow64)
             {
@@ -181,8 +280,6 @@ public sealed class PointerChainDeathReader : IDeathReader
                 addr = v64;
             }
 
-            // Remember the address we just read from. After the last iteration this
-            // is the memory location holding the 4-byte death count.
             endpoint = target;
         }
 

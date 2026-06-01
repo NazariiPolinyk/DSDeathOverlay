@@ -91,6 +91,33 @@ public class PointerChainWalkTests
     }
 
     [Fact]
+    public void Walk_FinalHopInt32_SrShadowyStyle_ReadsDeathAtLastOffset()
+    {
+        // SrShadowy DSII-SOTFS-DIE-COUNT: base+0x16148F0, then 0xD0/0x490 deref, int at +0x1A4.
+        var mem = new FakeMemoryReader { IsWow64 = false };
+        ulong a = 0x1000_0000UL + 0x16148F0UL;
+        ulong b = 0x3000_0000UL;
+        ulong c = 0x4000_0000UL;
+
+        ulong d = 0x5000_0000UL;
+        mem.Qwords[a] = b;
+        mem.Qwords[b + 0xD0] = c;
+        mem.Qwords[c + 0x490] = d;
+        mem.Dwords[d + 0x1A4] = 42;
+
+        bool ok = PointerChainDeathReader.TryWalkDiagnostic(
+            mem,
+            new[] { 0x16148F0, 0xD0, 0x490, 0x1A4 },
+            finalHopInt32: true,
+            out int value,
+            out _,
+            out _);
+
+        Assert.True(ok);
+        Assert.Equal(42, value);
+    }
+
+    [Fact]
     public void Walk_LongChain_DS2Style_WorksWithFourHops()
     {
         // Simulates DS2 SotFS x64 chain {0x16148F0, 0xD0, 0x490, 0x104} layout.

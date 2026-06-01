@@ -42,6 +42,14 @@ public class GameProfileStoreTests
         Assert.True(ds2.UsesPointerChain);
         Assert.NotNull(ds2.ChainOffsets32);
         Assert.NotNull(ds2.ChainOffsets64);
+        Assert.NotNull(ds2.ChainVariants64);
+        Assert.NotEmpty(ds2.ChainVariants64!);
+        Assert.True(ds2.ChainVariants64![0].FinalHopInt32);
+
+        // Must match DSDeaths / SrShadowy hex literals (0x16244F0 was a bad decimal typo).
+        const int dsDeathsBase = 0x16148F0;
+        Assert.Equal(dsDeathsBase, ds2.ChainOffsets64![0]);
+        Assert.Equal(dsDeathsBase, ds2.ChainVariants64![0].Offsets[0]);
     }
 
     [Theory]

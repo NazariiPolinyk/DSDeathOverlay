@@ -4,7 +4,8 @@
     "chains below, edit the matching entry and restart the overlay. The 'chainOffsets64'",
     "values are integers (decimal); the first one is the module-relative base offset,",
     "subsequent values are offsets within the dereferenced pointer at each step.",
-    "Pointer chain offsets ported from https://github.com/Quidrex/DSDeaths/blob/master/Program.cs"
+    "Pointer chain offsets ported from https://github.com/Quidrex/DSDeaths/blob/master/Program.cs",
+    "DS2 x64 chain is decimal ints: 0x16148F0, 0xD0, 0x490, 0x104 (NOT 0x16244F0 — that was a bad decimal typo)."
   ],
   "games": [
     {
@@ -21,7 +22,14 @@
       "processName": "DarkSoulsII",
       "moduleName": "DarkSoulsII.exe",
       "chainOffsets32": [ 18154004, 116, 184, 52, 4, 652, 256 ],
-      "chainOffsets64": [ 23217392, 208, 1168, 260 ]
+      "chainOffsets64": [ 23152880, 208, 1168, 260 ],
+      "chainVariants64": [
+        {
+          "label": "SrShadowy HUD dots (SotFS 1.03 / Cal 2.02)",
+          "offsets": [ 23152880, 208, 1168, 420 ],
+          "finalHopInt32": true
+        }
+      ]
     },
     {
       "displayName": "Dark Souls III",

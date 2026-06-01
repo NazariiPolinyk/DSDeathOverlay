@@ -56,8 +56,9 @@ Pre-built Windows builds are published on
    **Release** workflow manually and download the zip from that run’s
    **Artifacts** if no release exists yet).
 3. Extract the zip anywhere.
-4. Run `DSDeathOverlay.exe` (keep `games.json` in the same folder if you want
-   to edit offsets without rebuilding).
+4. Run `DSDeathOverlay.exe`. Keep `games.json` next to the exe only if you
+   intentionally override offsets — an old copy from another download can break
+   DS2; delete it to use the embedded defaults from the release zip.
 
 No .NET install is required — the release is a self-contained single-file exe.
 
@@ -216,9 +217,16 @@ which step failed, throttled to once every five seconds:
 - `[DS2] chain read failed: hop 2: TryReadUInt64(0x...) failed (offset 0xD0)`
   — a pointer-chain hop dereferenced unreadable memory. The chain in
   `games.json` is out of date (game patched) or wrong for this build.
-- `[DS2] chain read failed: hop 1: previous deref was null` — the game has
-  not allocated the player struct yet; usually a few seconds of patience
-  fixes it. If it persists, the chain is broken.
+- `[DS2] chain read failed: hop 1: previous deref was null` — the pointer at
+  `DarkSoulsII.exe+0x16148F0` is still zero. You must be **in a loaded save**
+  (not the title screen / character select). If it persists in Majula, the log
+  line also prints `Static slot 0x... holds 0x0` — the chain base in
+  `games.json` is wrong for your game build, or your copy of `games.json` next
+  to the .exe is outdated (delete it to use the embedded one from the release).
+  The overlay automatically tries a second chain (SrShadowy HUD dots) after the
+  DSDeaths chain; if both fail, update offsets from
+  [DSDeaths](https://github.com/Quidrex/DSDeaths) or
+  [DSII-SOTFS-DIE-COUNT](https://github.com/SrShadowy/DSII-SOTFS-DIE-COUNT).
 - `[DS2] chain produced negative value -267242410 (endpoint 0x...); rejecting
   as garbage` — the chain walked through readable memory but landed on a slot
   whose contents are not a 4-byte death-count int (almost always a

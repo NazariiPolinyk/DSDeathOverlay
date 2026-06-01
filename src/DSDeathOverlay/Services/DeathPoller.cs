@@ -63,6 +63,10 @@ public sealed class DeathPoller : IDisposable
     private int? _lastCount;
     private PollerStatus _lastStatus = (PollerStatus)(-1); // force initial change event
     private GameProfile? _lastGame;
+    private int _lastDroppedPid;
+    private DateTime _lastDropUtc = DateTime.MinValue;
+
+    private static readonly TimeSpan ReconnectCooldown = TimeSpan.FromSeconds(2);
 
     /// <summary>Raised on every state change (death count, status, or active game).</summary>
     public event EventHandler<DeathCountEventArgs>? Updated;
@@ -94,6 +98,12 @@ public sealed class DeathPoller : IDisposable
                 if (_proc is null)
                 {
                     Emit(null, PollerStatus.WaitingForGame, null);
+                    if (DateTime.UtcNow - _lastDropUtc < ReconnectCooldown)
+                    {
+                        await Delay(ReconnectCooldown, ct).ConfigureAwait(false);
+                        continue;
+                    }
+
                     _proc = ProcessAccess.TryOpenAnyKnown(_profiles.Games, out _activeProfile, _log);
                     if (_proc is null || _activeProfile is null)
                     {
@@ -158,6 +168,12 @@ public sealed class DeathPoller : IDisposable
     private void DropConnection(string reason)
     {
         _log.Log($"Dropping connection ({_activeProfile?.ShortTag ?? "?"}): {reason}");
+        if (_proc is not null)
+        {
+            _lastDroppedPid = _proc.ProcessId;
+            _lastDropUtc = DateTime.UtcNow;
+        }
+
         _reader = null;
         _proc?.Dispose();
         _proc = null;
