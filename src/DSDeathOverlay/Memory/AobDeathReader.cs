@@ -21,6 +21,11 @@ public sealed class AobDeathReader : IDeathReader
     private readonly ProcessAccess _proc;
     private readonly GameProfile _profile;
     private readonly ILogger _log;
+    private bool _loggedFirstRead;
+    private long _lastFailLogTicks;
+
+    /// <summary>Min interval between repeated rejection log lines.</summary>
+    private static readonly TimeSpan FailLogInterval = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Absolute remote address of the static pointer slot. Zero until
@@ -88,11 +93,43 @@ public sealed class AobDeathReader : IDeathReader
 
         if (instance == 0) return null; // title screen / no character
 
-        if (!_proc.TryReadInt32(instance + (ulong)_profile.AobValueOffset!.Value, out int deaths))
+        ulong slot = instance + (ulong)_profile.AobValueOffset!.Value;
+        if (!_proc.TryReadInt32(slot, out int deaths))
             return null;
 
-        if (deaths < 0 || deaths > 1_000_000) return null;
+        // Negative is obviously garbage (no upper cap — a real player can rack up
+        // tens of thousands of deaths). If From ever shifts the AOB and the slot
+        // lands on a pointer field, this path would otherwise silently collapse
+        // to "load a save" with no diagnostics. Surface it (throttled) so the
+        // user can update games.json next to the .exe instead of guessing.
+        if (deaths < 0)
+        {
+            LogThrottled(
+                $"[{_profile.ShortTag}] slot produced negative value {deaths} " +
+                $"(slot 0x{slot:X}); rejecting as garbage. " +
+                $"AOB or value offset in games.json may be stale.");
+            return null;
+        }
 
+        if (!_loggedFirstRead)
+        {
+            _loggedFirstRead = true;
+            _log.Log($"[{_profile.ShortTag}] first read: {deaths} (death slot = 0x{slot:X}).");
+        }
         return deaths;
+    }
+
+    /// <summary>
+    /// Emit <paramref name="message"/> at most once per <see cref="FailLogInterval"/>
+    /// so a broken AOB/offset cannot spam <c>deaths.log</c> at the poll rate.
+    /// </summary>
+    private void LogThrottled(string message)
+    {
+        long now = DateTime.UtcNow.Ticks;
+        if (now - _lastFailLogTicks > FailLogInterval.Ticks)
+        {
+            _lastFailLogTicks = now;
+            _log.Log(message);
+        }
     }
 }

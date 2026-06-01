@@ -30,6 +30,11 @@ public sealed class PointerChainDeathReader : IDeathReader
     private readonly ILogger _log;
     private readonly int[] _offsets;
     private bool _initialized;
+    private bool _loggedFirstRead;
+    private long _lastFailLogTicks;
+
+    /// <summary>Min interval between repeated chain-failure log lines.</summary>
+    private static readonly TimeSpan FailLogInterval = TimeSpan.FromSeconds(5);
 
     public bool IsReady => _initialized;
 
@@ -66,10 +71,50 @@ public sealed class PointerChainDeathReader : IDeathReader
     public int? TryReadDeathCount()
     {
         if (!_initialized) return null;
-        if (!TryWalk(_reader, _offsets, out int value)) return null;
 
-        if (value < 0 || value > 1_000_000) return null;
+        if (!TryWalkDiagnostic(_reader, _offsets, out int value, out ulong endpoint, out string? failure))
+        {
+            LogThrottled($"[{_profile.ShortTag}] chain read failed: {failure}");
+            return null;
+        }
+
+        // A real death count is never negative. A negative result means the chain
+        // walked through readable memory but landed somewhere whose low 32 bits
+        // have the high bit set — almost always a pointer-aligned field, i.e. the
+        // chain is stale for this game build. Surface it loudly (throttled) so the
+        // user can copy fresh offsets from DSDeaths into games.json next to the
+        // .exe; pre-fix this path was silent and looked indistinguishable from
+        // "no save loaded".
+        if (value < 0)
+        {
+            LogThrottled(
+                $"[{_profile.ShortTag}] chain produced negative value {value} " +
+                $"(endpoint 0x{endpoint:X}); rejecting as garbage. " +
+                $"Chain may be stale — check DSDeaths master for newer offsets.");
+            return null;
+        }
+
+        if (!_loggedFirstRead)
+        {
+            _loggedFirstRead = true;
+            _log.Log($"[{_profile.ShortTag}] first read: {value} (chain endpoint = 0x{endpoint:X}).");
+        }
         return value;
+    }
+
+    /// <summary>
+    /// Emit <paramref name="message"/> at most once per <see cref="FailLogInterval"/>.
+    /// Shared between the chain-failure and negative-value paths so a busted chain
+    /// can't double up its log spam at full poll rate.
+    /// </summary>
+    private void LogThrottled(string message)
+    {
+        long now = DateTime.UtcNow.Ticks;
+        if (now - _lastFailLogTicks > FailLogInterval.Ticks)
+        {
+            _lastFailLogTicks = now;
+            _log.Log(message);
+        }
     }
 
     /// <summary>
@@ -77,29 +122,68 @@ public sealed class PointerChainDeathReader : IDeathReader
     /// <see cref="IMemoryReader"/> and produces the final 4-byte value.
     /// </summary>
     public static bool TryWalk(IMemoryReader reader, int[] offsets, out int value)
+        => TryWalkDiagnostic(reader, offsets, out value, out _, out _);
+
+    /// <summary>
+    /// Same walk as <see cref="TryWalk"/>, but additionally reports the address that
+    /// produced the final read and a human-readable failure reason when the walk
+    /// aborts. Used by <see cref="TryReadDeathCount"/> to surface useful diagnostics
+    /// in <c>deaths.log</c> without changing the public test surface.
+    /// </summary>
+    public static bool TryWalkDiagnostic(
+        IMemoryReader reader,
+        int[] offsets,
+        out int value,
+        out ulong endpoint,
+        out string? failure)
     {
         value = 0;
-        if (offsets is null || offsets.Length == 0) return false;
+        endpoint = 0;
+        failure = null;
+
+        if (offsets is null || offsets.Length == 0)
+        {
+            failure = "empty offset chain";
+            return false;
+        }
 
         ulong addr = reader.ModuleBase;
 
-        foreach (int off in offsets)
+        for (int i = 0; i < offsets.Length; i++)
         {
-            if (addr == 0) return false;
+            int off = offsets[i];
+
+            if (addr == 0)
+            {
+                failure = $"hop {i}: previous deref was null (game on title screen or struct not allocated)";
+                return false;
+            }
 
             // Two's-complement add — negative offsets are legal in CE-style chains.
-            addr = unchecked(addr + (ulong)(long)off);
+            ulong target = unchecked(addr + (ulong)(long)off);
 
             if (reader.IsWow64)
             {
-                if (!reader.TryReadUInt32(addr, out uint v32)) return false;
+                if (!reader.TryReadUInt32(target, out uint v32))
+                {
+                    failure = $"hop {i}: TryReadUInt32(0x{target:X}) failed (offset 0x{off:X})";
+                    return false;
+                }
                 addr = v32;
             }
             else
             {
-                if (!reader.TryReadUInt64(addr, out ulong v64)) return false;
+                if (!reader.TryReadUInt64(target, out ulong v64))
+                {
+                    failure = $"hop {i}: TryReadUInt64(0x{target:X}) failed (offset 0x{off:X})";
+                    return false;
+                }
                 addr = v64;
             }
+
+            // Remember the address we just read from. After the last iteration this
+            // is the memory location holding the 4-byte death count.
+            endpoint = target;
         }
 
         value = unchecked((int)addr);

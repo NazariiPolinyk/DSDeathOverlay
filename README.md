@@ -205,8 +205,35 @@ copy baked into the .exe so it always boots.
 ## Diagnostics
 
 If the counter never appears, check `deaths.log` next to `DSDeathOverlay.exe`.
-It records: process opens, the AOB hit address, pointer-chain bitness, and
-any read failures.
+It records: process opens, the AOB hit address, pointer-chain bitness, the
+first successful death-count read, and any read failures.
+
+### Overlay stuck on `(load a save)` with a save actually loaded
+
+This means the reader could not produce a usable value. `deaths.log` will say
+which step failed, throttled to once every five seconds:
+
+- `[DS2] chain read failed: hop 2: TryReadUInt64(0x...) failed (offset 0xD0)`
+  — a pointer-chain hop dereferenced unreadable memory. The chain in
+  `games.json` is out of date (game patched) or wrong for this build.
+- `[DS2] chain read failed: hop 1: previous deref was null` — the game has
+  not allocated the player struct yet; usually a few seconds of patience
+  fixes it. If it persists, the chain is broken.
+- `[DS2] chain produced negative value -267242410 (endpoint 0x...); rejecting
+  as garbage` — the chain walked through readable memory but landed on a slot
+  whose contents are not a 4-byte death-count int (almost always a
+  pointer-aligned field). The offsets in `games.json` are stale for this game
+  build; update them from DSDeaths and restart.
+- `[DSR] AOB pattern NOT found in DarkSoulsRemastered.exe` — the pattern in
+  `games.json` no longer matches the game's binary.
+
+On the first successful read the log also prints
+`[DS2] first read: 12345 (chain endpoint = 0x...)` so you can sanity-check
+the number against the Majula gravestone (offline mode).
+
+If a hop is broken, update the chain or AOB in `games.json` next to the .exe
+and restart. The shipped chains track [DSDeaths](https://github.com/Quidrex/DSDeaths/blob/master/Program.cs)
+master; if DSDeaths has newer values, paste them in and try again.
 
 ## How it works
 
