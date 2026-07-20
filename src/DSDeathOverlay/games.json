@@ -5,7 +5,10 @@
     "values are integers (decimal); the first one is the module-relative base offset,",
     "subsequent values are offsets within the dereferenced pointer at each step.",
     "Pointer chain offsets ported from https://github.com/Quidrex/DSDeaths/blob/master/Program.cs",
-    "DS2 x64 chain is decimal ints: 0x16148F0, 0xD0, 0x490, 0x104 (NOT 0x16244F0 — that was a bad decimal typo)."
+    "Base offsets are the FIRST array element and must match DSDeaths master hex exactly:",
+    "  DS2 x64 = 0x16148F0 (23152880), DS2 x86 = 0x1150414 (18154516),",
+    "  DS3      = 0x47572B8 (74805944), Sekiro  = 0x3D5AAC0 (64334528).",
+    "Earlier builds shipped mis-converted decimals (e.g. DS2 0x16244F0, DS3 0x47662B8) that read a null static slot and stuck the overlay on 'load a save'."
   ],
   "games": [
     {
@@ -36,14 +39,14 @@
       "shortTag": "DS3",
       "processName": "DarkSoulsIII",
       "moduleName": "DarkSoulsIII.exe",
-      "chainOffsets64": [ 74867384, 152 ]
+      "chainOffsets64": [ 74805944, 152 ]
     },
     {
       "displayName": "Sekiro: Shadows Die Twice",
       "shortTag": "SEK",
       "processName": "sekiro",
       "moduleName": "sekiro.exe",
-      "chainOffsets64": [ 64269504, 144 ]
+      "chainOffsets64": [ 64334528, 144 ]
     }
   ]
 }

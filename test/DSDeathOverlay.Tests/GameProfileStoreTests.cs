@@ -66,6 +66,20 @@ public class GameProfileStoreTests
         Assert.NotEmpty(profile.ChainOffsets64!);
     }
 
+    [Theory]
+    // Base offset (first chain element) must match DSDeaths master hex exactly.
+    // A mis-converted decimal reads a null static slot and stalls on "load a save".
+    [InlineData("DS3", 0x47572B8, 0x98)]
+    [InlineData("SEK", 0x3D5AAC0, 0x90)]
+    public void EmbeddedGames_64BitBases_MatchDsDeathsMaster(string tag, int expectedBase, int expectedSecond)
+    {
+        var set = GameProfileStore.LoadEmbedded()!;
+        var chain = set.Games.Single(g => g.ShortTag == tag).ChainOffsets64!;
+
+        Assert.Equal(expectedBase, chain[0]);
+        Assert.Equal(expectedSecond, chain[1]);
+    }
+
     [Fact]
     public void Deserialize_ValidJson_RoundTrips()
     {

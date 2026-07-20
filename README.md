@@ -184,7 +184,7 @@ garbage (or zero) for DS2 / DS3 / Sekiro, edit `games.json` next to
       "shortTag": "DS3",
       "processName": "DarkSoulsIII",
       "moduleName": "DarkSoulsIII.exe",
-      "chainOffsets64": [ 74867384, 152 ]
+      "chainOffsets64": [ 74805944, 152 ]
     }
   ]
 }
